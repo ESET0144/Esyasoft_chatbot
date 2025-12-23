@@ -1,0 +1,10 @@
+# Secrets (ignore everywhere)
+.env
+*.env
+
+# Pytest
+.pytest_cache/
+
+# Python
+__pycache__/
+*.pyc
