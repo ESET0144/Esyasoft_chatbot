@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Login</title>
+</head>
+<body>
+
+<h3>Login</h3>
+
+<form id="loginForm">
+  <label>
+    Username:
+    <input name="username" required>
+  </label>
+  <br><br>
+
+  <label>
+    Password:
+    <input name="password" type="password" required>
+  </label>
+  <br><br>
+
+  <button type="submit">Login</button>
+</form>
+
+<p id="error" style="color:red; display:none;">
+  Invalid username or password
+</p>
+
+<script>
+document.getElementById("loginForm").addEventListener("submit", async function (e) {
+  e.preventDefault();
+
+  const formData = new FormData(this);
+  const error = document.getElementById("error");
+  error.style.display = "none";
+
+  const res = await fetch("/token", {
+    method: "POST",
+    body: formData
+  });
+
+  if (!res.ok) {
+    error.style.display = "block";
+    return;
+  }
+
+  const data = await res.json();
+
+  // Store token for API calls
+  localStorage.setItem("access_token", data.access_token);
+
+  // Redirect to chat page
+  window.location.href = "/chat-ui";
+});
+</script>
+
+</body>
+</html>

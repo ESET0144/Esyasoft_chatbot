@@ -1,0 +1,11 @@
+langgraph
+langchain-core
+python-dotenv
+ollama
+langchain
+joblib
+pandas
+plotly
+prophet
+ollama
+streamlit

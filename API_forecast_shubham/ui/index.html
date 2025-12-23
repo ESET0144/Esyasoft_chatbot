@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Energy Forecast Chatbot</title>
+  <link rel="stylesheet" href="/ui/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1>Energy Forecast Chatbot</h1>
+      <p class="sub">Ask to predict demand, retrain the model or chat.</p>
+    </header>
+
+    <main class="chat-container" id="chatContainer">
+      <div id="messages" class="messages"></div>
+    </main>
+
+    <form id="inputForm" class="input-form" onsubmit="return sendMessage();">
+      <input id="input" class="input" type="text" placeholder="Type your message (e.g. 'predict 2017-03-12 17:00:00')" autocomplete="off" />
+      <button id="sendBtn" class="btn" type="submit">Send</button>
+    </form>
+
+    <footer class="footer">
+      <small>Local server: <code>http://127.0.0.1:8000</code></small>
+    </footer>
+  </div>
+
+  <script src="/ui/script.js"></script>
+</body>
+</html>
