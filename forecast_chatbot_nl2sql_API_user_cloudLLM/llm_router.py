@@ -1,24 +1,20 @@
 import os
 from ollama import chat
-
-# Optional: cloud example (OpenAI-style)
-try:
-    from openai import OpenAI
-    openai_client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
-    base_url=os.getenv("OPENAI_BASE_URL"),
-    default_headers={
-        "HTTP-Referer": "http://localhost:8000",
-        "X-Title": "Forecast-NL2SQL-Chatbot"
-    }
-)
-except Exception:
-    openai_client = None
+from openai import OpenAI
 
 
 MODEL_OLLAMA = "gpt-oss:20b"
-MODEL_CLOUD = "gpt-4o-mini"   # example
+MODEL_CLOUD = "google/gemma-3-27b-it:free"   # example
 
+def get_openai_client():
+    return OpenAI(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_BASE_URL"),
+        default_headers={
+            "HTTP-Referer": "http://localhost:8000",
+            "X-Title": "Forecast-NL2SQL-Chatbot"
+        }
+    )
 
 def run_llm(messages, llm_mode="ollama", model=None) -> str:
     """
@@ -34,20 +30,28 @@ def run_llm(messages, llm_mode="ollama", model=None) -> str:
         )
 
         # Ollama SDK response handling
-        if isinstance(resp, dict):
-            return resp.get("message", {}).get("content", "").strip()
+        # It may be a dict or a Pydantic-like object
+        try:
+            if hasattr(resp, "message") and hasattr(resp.message, "content"):
+                return resp.message.content.strip()
+            if isinstance(resp, dict):
+                return resp.get("message", {}).get("content", "").strip()
+        except Exception:
+            pass
 
         return str(resp)
 
     # ---------- CLOUD ----------
     if llm_mode == "cloud":
-        if openai_client is None:
-            raise RuntimeError("Cloud LLM not configured")
+        client = get_openai_client()
 
-        completion = openai_client.chat.completions.create(
-            model=model or MODEL_CLOUD,
-            messages=messages
-        )
-        return completion.choices[0].message.content.strip()
+        try:
+            completion = client.chat.completions.create(
+                model=model or MODEL_CLOUD,
+                messages=messages
+            )
+            return completion.choices[0].message.content.strip()
+        except Exception as e:
+            return f"Cloud LLM Error: {str(e)}"
 
     raise ValueError(f"Unknown llm_mode: {llm_mode}")

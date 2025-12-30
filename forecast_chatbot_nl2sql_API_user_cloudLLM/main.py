@@ -1,7 +1,7 @@
 # main.py
 import os
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 from fastapi import FastAPI, Request, Depends, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
@@ -100,7 +100,7 @@ def chat_endpoint(body: dict, token_payload=Depends(JWTBearer())):
     # 3️⃣ FORECAST
     if intent == "python_model":
         logger.info("Route → FORECAST PIPELINE")
-        return forecast_revenue(question)
+        return forecast_revenue(question, role, llm_mode=llm_mode)
 
     # 4️⃣ NL2SQL
     logger.info("Route → NL2SQL PIPELINE")

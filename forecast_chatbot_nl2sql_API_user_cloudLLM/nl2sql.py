@@ -3,7 +3,7 @@ import textwrap
 from typing import Any, List
 from llm_router import run_llm
 
-MODEL_CLOUD = "gpt-4o-mini"     # or whatever you use
+MODEL_CLOUD = "google/gemma-3-27b-it:free"     # or whatever you use
 MODEL_OLLAMA = "gpt-oss:20b"
 
 FEW_SHOT = textwrap.dedent("""
@@ -126,10 +126,25 @@ def natural_to_sql(question: str, schema: str, llm_mode: str = "ollama") -> str:
             return "--CANNOT_CONVERT--"
 
         sql_text = sql_text.strip()
+        
+        # Naive "sql:" removal
         if sql_text.lower().startswith("sql:"):
             sql_text = sql_text[len("sql:"):].strip()
-        if not sql_text.endswith(";"):
-            sql_text = sql_text + ";"
+            
+        # Regex to find SELECT statement (case-insensitive, multiline)
+        # Looks for SELECT ... ;
+        import re
+        match = re.search(r"(SELECT\s.*?;)", sql_text, re.IGNORECASE | re.DOTALL)
+        if match:
+            sql_text = match.group(1).strip()
+            # Remove any markdown code block backticks if they were captured inside but highly unlikely with this regex unless the block started with SELECT
+            sql_text = sql_text.replace("```", "").replace("`", "")
+        else:
+            # Fallback for simple single line without semicolon or if regex failed
+            # Try to just ensure semicolon if it looks like a query
+            if not sql_text.endswith(";"):
+                sql_text = sql_text + ";"
+        
         return sql_text
     except Exception as e:
         return f"--CANNOT_CONVERT-- ({e})"

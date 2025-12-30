@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import logging
+from llm_router import run_llm
 
 # ---------- LOGGER ----------
 logger = logging.getLogger("FORECAST")
@@ -135,14 +136,26 @@ def make_time_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------- Main forecast entry ----------
-def forecast_revenue(question: str) -> dict:
+def forecast_revenue(question: str, role: str, llm_mode: str = "ollama") -> dict:
     logger.info("===== FORECAST PIPELINE START =====")
-    logger.info(f"[FORECAST] Question: {question}")
+    logger.info(f"[FORECAST] Question: {question} | Role: {role} | LLM Mode: {llm_mode}")
+    
+    # SECURITY CHECK
+    from security import allowed_tables_for_role
+    allowed = allowed_tables_for_role(role)
+    if "revenue_data" not in allowed:
+        logger.warning(f"[FORECAST] Access Denied for role {role}")
+        return {
+            "output_type": "error",
+            "summary": "Access Denied: You do not have permission to access revenue forecasts.",
+            "error": "Access Denied: You do not have permission to access revenue forecasts."
+        }
 
     if not os.path.exists(MODEL_PATH):
         logger.error("[FORECAST] Model file not found")
         return {
             "output_type": "error",
+            "summary": "Revenue forecast model not found. Please train the model first.",
             "error": "Revenue forecast model not found. Train the model first."
         }
 
@@ -154,6 +167,7 @@ def forecast_revenue(question: str) -> dict:
         logger.error("[FORECAST] No data available for forecasting")
         return {
             "output_type": "error",
+            "summary": "No historical revenue data found.",
             "error": "No historical revenue data found."
         }
 
@@ -221,6 +235,30 @@ def forecast_revenue(question: str) -> dict:
     "last available date"
     )
 
+    # ---------- LLM-based Summary ----------
+    total_rev = future_df["Predicted_Revenue"].sum()
+    avg_rev = future_df["Predicted_Revenue"].mean()
+    
+    prompt = (
+        f"You are a data analyst assistant. \n"
+        f"Question: {question}\n"
+        f"Data Context: \n"
+        f"- Forecast Horizon: {horizon} periods\n"
+        f"- Start Date: {anchor_txt}\n"
+        f"- Total Forecasted Revenue: {total_rev:,.2f}\n"
+        f"- Average Forecasted Revenue: {avg_rev:,.2f}\n"
+        f"Generate a concise (1-2 sentences) natural language answer to the user's question based on this data."
+    )
+    
+    try:
+        summary_text = run_llm(
+             messages=[{"role": "user", "content": prompt}],
+             llm_mode=llm_mode
+        )
+    except Exception as e:
+        logger.error(f"LLM Summary failed: {e}")
+        summary_text = f"Forecasted revenue for next {horizon} periods from {anchor_txt}. Total: {total_rev:,.2f}"
+
     return {
         "question": question,
         "intent": "python_model",
@@ -230,9 +268,6 @@ def forecast_revenue(question: str) -> dict:
         "columns": ["Datetime", "Predicted_Revenue"],
         "ncols": 2,
         "result": rows,   # ✅ array of arrays
-        "summary": (
-    f"Forecasted revenue for the next {horizon} periods "
-    f"starting from {anchor_txt} using a Ridge Regression model."
-    ),
+        "summary": summary_text.strip(),
         "include_table": True
     }

@@ -53,58 +53,52 @@ def handle_nl2sql(question: str, role: str, schema: str, llm_mode: str = "ollama
         if idx != -1:
             generated_sql = generated_sql[idx:]
 
+    # Check for refusal signal BEFORE stripping comments
+    if generated_sql.startswith("--CANNOT_CONVERT--") or "--CANNOT_CONVERT--" in generated_sql:
+        logger.warning("NL2SQL → FAILED (cannot convert)")
+        return {
+            "question": question,
+            "output_type": "nl",
+            "summary": "I cannot answer this question because it might violate safety rules or is ambiguous.",
+            "include_table": False
+        }
+
     # Remove SQL comments
     generated_sql = generated_sql.split("--")[0].strip()
 
     # Ensure semicolon
     if not generated_sql.endswith(";"):
         generated_sql += ";"
-    
-    if generated_sql.startswith("--CANNOT_CONVERT--"):
-        logger.warning("NL2SQL → FAILED (cannot convert)")
-        return {
-            "question": question,
-            "output_type": "nl",
-            "summary": "I couldn’t convert this into a database query.",
-            "include_table": False
-        }
 
     logger.info(f"SQL GENERATED → {generated_sql}")
     lower_sql = generated_sql.lower()
 
     # ---------- ROLE-BASED ACCESS CONTROL ----------
+    # ---------- EXECUTE SQL ----------
+    # Use secure_run_query with role-specific allowed tables
+    # This replaces the flawed regex check above and prevents bypassing security
+    from db import secure_run_query
+    
     allowed_tables = allowed_tables_for_role(role)
-    tables_used = re.findall(r"(?:from|join)\s+([a-zA-Z_]+)", lower_sql)
-
-    for table in set(tables_used):
-        if table not in allowed_tables:
-            logger.warning(f"ACCESS DENIED → table={table}, role={role}")
-            return {
+    rows_data = secure_run_query(generated_sql, allowed_tables)
+    
+    if isinstance(rows_data, dict) and rows_data.get("error"):
+        error_msg = rows_data['error']
+        logger.error(f"SQL EXECUTION FAILED → {error_msg}")
+        
+        # Friendly message for permission errors
+        if "unauthorized_table_access" in error_msg:
+             return {
                 "question": question,
                 "output_type": "nl",
-                "summary": f"You are not authorized to access `{table}`.",
+                "summary": f"Access Denied: You do not have permission to access the requested data.",
                 "include_table": False
             }
-
-    # ---------- SQL SAFETY ----------
-    forbidden = ["drop ", "delete ", "update ", "alter ", "attach ", "detach ", "vacuum", "--"]
-    if any(f in lower_sql for f in forbidden):
-        logger.error("SQL BLOCKED → unsafe keywords detected")
+            
         return {
             "question": question,
             "output_type": "nl",
-            "summary": "Generated SQL was blocked for safety reasons.",
-            "include_table": False
-        }
-
-    # ---------- EXECUTE SQL ----------
-    rows_data = run_query(generated_sql)
-    if isinstance(rows_data, dict) and rows_data.get("error"):
-        logger.error(f"SQL EXECUTION FAILED → {rows_data['error']}")
-        return {
-            "question": question,
-            "output_type": "nl",
-            "summary": f"Query failed: {rows_data['error']}",
+            "summary": f"Query failed: {error_msg}",
             "include_table": False
         }
 
