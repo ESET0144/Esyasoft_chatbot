@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+PyJWT
+sqlparse
+jinja2
+openai
+ollama
+python-dotenv

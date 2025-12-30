@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Forecast Chat — Chat UI</title>
+
+  <style>
+    html,body { height:100%; margin:0; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+      background:#f3f4f6;
+      display:flex;
+      flex-direction:column;
+    }
+    .container {
+      max-width:1000px;
+      margin:0 auto;
+      width:100%;
+      display:flex;
+      flex-direction:column;
+      flex:1;
+    }
+    .card {
+      background:white;
+      margin:16px;
+      padding:18px;
+      border-radius:12px;
+      box-shadow:0 6px 18px rgba(0,0,0,0.06);
+      flex:1;
+      overflow:auto;
+      display:flex;
+      flex-direction:column;
+    }
+    .chat {
+      margin-top:8px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      padding-bottom:140px;
+    }
+    .msg { max-width:80%; padding:10px 12px; border-radius:12px; }
+    .user {
+      align-self:flex-end;
+      background:#ede9fe;
+      color:#111827;
+      border-bottom-right-radius:4px;
+    }
+    .assistant {
+      align-self:flex-start;
+      background:#0f172a;
+      color:#e6eef8;
+      border-bottom-left-radius:4px;
+    }
+    .sql {
+      background:#111827;
+      color:#e6eef8;
+      padding:10px;
+      border-radius:8px;
+      overflow:auto;
+      font-family:monospace;
+      font-size:13px;
+      margin-top:8px;
+    }
+    table {
+      width:100%;
+      border-collapse:collapse;
+      margin-top:8px;
+    }
+    th, td {
+      padding:8px 10px;
+      border-bottom:1px solid #e6eef8;
+      text-align:left;
+    }
+    .muted { color:#6b7280; font-size:13px; }
+    .footer {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(255,255,255,0.98);
+      border-top: 1px solid #e6eef8;
+      padding: 10px;
+      display:flex;
+      justify-content:center;
+      z-index: 999;
+    }
+    .controls {
+      width:100%;
+      max-width:1000px;
+      display:flex;
+      gap:8px;
+      align-items:center;
+    }
+    textarea {
+      flex:1;
+      min-height:48px;
+      padding:10px;
+      border-radius:8px;
+      border:1px solid #e5e7eb;
+      font-size:14px;
+      resize:none;
+    }
+    button {
+      padding:10px 14px;
+      border-radius:8px;
+      border:none;
+      background:#6d28d9;
+      color:white;
+      cursor:pointer;
+    }
+    button:disabled {
+      background:#9333ea;
+      cursor:not-allowed;
+      opacity:0.7;
+    }
+  </style>
+</head>
+
+
+
+<body>
+  <div class="container">
+    <div class="card">
+      <h2>Forecast Chat</h2>
+      <button id="logoutBtn"
+        style="
+          position:absolute;
+          top:24px;
+          right:24px;
+          padding:6px 14px;
+          border-radius:8px;
+          border:none;
+          background:#ef4444;
+          color:white;
+          cursor:pointer;
+        ">
+        Logout
+      </button>
+      <div class="muted">
+        Ask questions naturally. The system auto-detects table, graph or summary.
+      </div>
+      <div id="chat" class="chat"></div>
+      <div id="activeModel" class="muted"></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="controls">
+      <textarea id="q" placeholder="Ask something..."></textarea>
+      <button id="sendBtn">Send</button>
+      <button id="clearBtn">Clear</button>
+      <select id="llmMode" style="padding:10px; border-radius:8px; border:1px solid #e5e7eb;">
+          <option value="ollama">Local (Ollama)</option>
+          <option value="cloud">Cloud (GPT-4o)</option>
+      </select>
+    </div>
+  </div>
+
+<script>
+const chatEl = document.getElementById('chat');
+const qEl = document.getElementById('q');
+const sendBtn = document.getElementById('sendBtn');
+const clearBtn = document.getElementById('clearBtn');
+
+const history = [];
+
+function escapeHtml(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
+
+function renderChat() {
+  chatEl.innerHTML = '';
+  for (const m of history) {
+    const d = document.createElement('div');
+    d.className = 'msg ' + (m.role === 'user' ? 'user' : 'assistant');
+
+    if (m.role === 'user') {
+      d.textContent = m.text;
+    }  else {
+      // Assistant message
+
+      // 1️⃣ Summary (always OK)
+      if (m.meta?.summary) {
+        const p = document.createElement('div');
+        p.style.fontWeight = 'bold';
+        p.textContent = m.meta.summary;
+        d.appendChild(p);
+      }
+
+     // 2️⃣ GRAPH MODE → image (do NOT stop here)
+      if (m.meta?.image) {
+        const img = document.createElement('img');
+        img.src = 'data:image/png;base64,' + m.meta.image;
+        img.style.maxWidth = '100%';
+        img.style.marginTop = '8px';
+        img.style.borderRadius = '8px';
+        d.appendChild(img);
+      }
+
+      // 3️⃣ SQL (show only when NOT graph-only)
+      if (m.meta?.generated_sql && !m.meta?.image) {
+        const pre = document.createElement('pre');
+        pre.className = 'sql';
+        pre.textContent = m.meta.generated_sql;
+        d.appendChild(pre);
+      }
+
+      // 4️⃣ TABLE (graph OR table mode)
+      if (m.meta?.include_table && m.meta?.columns && m.meta?.result) {
+        const table = document.createElement('table');
+
+        // Header
+        const thead = document.createElement('thead');
+        const trh = document.createElement('tr');
+        m.meta.columns.forEach(col => {
+          const th = document.createElement('th');
+          th.textContent = col;
+          trh.appendChild(th);
+        });
+        thead.appendChild(trh);
+        table.appendChild(thead);
+
+        // Body
+        const tbody = document.createElement('tbody');
+        m.meta.result.forEach(row => {
+          const tr = document.createElement('tr');
+          row.forEach(cell => {
+            const td = document.createElement('td');
+            td.textContent = cell;
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+
+        table.style.marginTop = '10px';
+        d.appendChild(table);
+      }
+    }
+    chatEl.appendChild(d);
+  }
+
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+
+sendBtn.onclick = async () => {
+  const question = qEl.value.trim();
+  if (!question) return;
+
+  history.push({ role:'user', text:question });
+  renderChat();
+  sendBtn.disabled = true;
+
+  const res = await fetch('/chat', {
+    method:'POST',
+    headers:{'Content-Type':'application/json',
+        'Authorization': 'Bearer ' + localStorage.getItem('access_token')
+    },
+    body: JSON.stringify({
+    question,
+    llm_mode: document.getElementById("llmMode").value
+})
+  });
+
+  console.log("Sending request to /chat");
+  const data = await res.json();
+
+  document.getElementById("activeModel").textContent =
+  "LLM used: " + document.getElementById("llmMode").value;
+
+  history.push({ role:'assistant', meta:data });
+  renderChat();
+
+
+  qEl.value = '';
+  sendBtn.disabled = false;
+};
+
+clearBtn.onclick = () => {
+  history.length = 0;
+  renderChat();
+};
+</script>
+
+<script>
+document.getElementById('logoutBtn').onclick = () => {
+  localStorage.removeItem('access_token');
+  window.location.href = '/login';
+};
+</script>
+</body>
+</html>

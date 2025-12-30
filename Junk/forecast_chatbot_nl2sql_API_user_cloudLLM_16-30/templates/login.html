@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<body>
+  <h3>Login</h3>
+  <form id="loginForm">
+    <label>Username: <input name="username" /></label><br/>
+    <label>Password: <input name="password" type="password" /></label><br/>
+    <button type="submit">Login</button>
+  </form>
+
+  <div id="err" style="color:red;"></div>
+
+<script>
+document.getElementById("loginForm").onsubmit = async (e) => {
+  e.preventDefault();
+
+  const form = e.target;
+  const data = new URLSearchParams(new FormData(form));
+
+  const res = await fetch("/token", {
+    method: "POST",
+    body: data
+  });
+
+  if (!res.ok) {
+    document.getElementById("err").innerText = "Invalid username or password";
+    return;
+  }
+
+  const json = await res.json();
+  localStorage.setItem("access_token", json.access_token);
+
+  window.location.href = "/chat-ui";
+};
+</script>
+</body>
+</html>
