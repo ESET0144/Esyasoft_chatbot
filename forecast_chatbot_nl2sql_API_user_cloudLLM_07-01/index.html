@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Forecast Chat — Chat UI</title>
+
+  <style>
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+      background: #f3f4f6;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+    }
+
+    .card {
+      background: white;
+      margin: 16px;
+      padding: 18px;
+      border-radius: 12px;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+      flex: 1;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chat {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding-bottom: 140px;
+    }
+
+    .msg {
+      max-width: 80%;
+      padding: 10px 12px;
+      border-radius: 12px;
+    }
+
+    .user {
+      align-self: flex-end;
+      background: #ede9fe;
+      color: #111827;
+      border-bottom-right-radius: 4px;
+    }
+
+    .assistant {
+      align-self: flex-start;
+      background: #0f172a;
+      color: #e6eef8;
+      border-bottom-left-radius: 4px;
+    }
+
+    .sql {
+      background: #111827;
+      color: #e6eef8;
+      padding: 10px;
+      border-radius: 8px;
+      overflow: auto;
+      font-family: monospace;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+
+    th,
+    td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e6eef8;
+      text-align: left;
+    }
+
+    .muted {
+      color: #6b7280;
+      font-size: 13px;
+    }
+
+    .footer {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.98);
+      border-top: 1px solid #e6eef8;
+      padding: 10px;
+      display: flex;
+      justify-content: center;
+      z-index: 999;
+    }
+
+    .controls {
+      width: 100%;
+      max-width: 1000px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    textarea {
+      flex: 1;
+      min-height: 48px;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+      font-size: 14px;
+      resize: none;
+    }
+
+    button {
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: none;
+      background: #6d28d9;
+      color: white;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      background: #9333ea;
+      cursor: not-allowed;
+      opacity: 0.7;
+    }
+  </style>
+</head>
+
+
+
+<body>
+  <div class="container">
+    <div class="card">
+      <h2>Forecast Chat</h2>
+      <button id="logoutBtn" style="
+          position:absolute;
+          top:24px;
+          right:24px;
+          padding:6px 14px;
+          border-radius:8px;
+          border:none;
+          background:#ef4444;
+          color:white;
+          cursor:pointer;
+        ">
+        Logout
+      </button>
+      <div class="muted">
+        Ask questions naturally. The system auto-detects table, graph or summary.
+      </div>
+      <div id="chat" class="chat"></div>
+      <div id="activeModel" class="muted"></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="controls">
+      <textarea id="q" placeholder="Ask something..."></textarea>
+      <button id="sendBtn">Send</button>
+      <button id="micBtn" style="background:#10b981;">🎤</button>
+      <button id="clearBtn">Clear</button>
+      <select id="llmMode" style="padding:10px; border-radius:8px; border:1px solid #e5e7eb;">
+        <option value="ollama">Local (Ollama)</option>
+        <option value="cloud">Cloud (GPT-4o)</option>
+      </select>
+    </div>
+  </div>
+
+  <script>
+    const chatEl = document.getElementById('chat');
+    const qEl = document.getElementById('q');
+    const sendBtn = document.getElementById('sendBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    const history = [];
+
+    function escapeHtml(s) {
+      return String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function renderChat() {
+      chatEl.innerHTML = '';
+      for (const m of history) {
+        const d = document.createElement('div');
+        d.className = 'msg ' + (m.role === 'user' ? 'user' : 'assistant');
+
+        if (m.role === 'user') {
+          d.textContent = m.text;
+        } else {
+          // Assistant message
+
+          // 0️⃣ Debug Info
+          if (m.meta?.debug_info) {
+            const di = m.meta.debug_info;
+            const small = document.createElement('div');
+            small.className = 'muted';
+            small.style.fontSize = '11px';
+            small.style.marginBottom = '4px';
+            // Updated: Removed Route, Added Time Taken
+            small.innerHTML = `LLM: <b>${escapeHtml(di.llm_mode)}</b> | Intent: <b>${escapeHtml(di.intent)}</b> | Time: <b>${escapeHtml(di.time_taken)}</b>`;
+            d.appendChild(small);
+          }
+
+          // 1️⃣ Summary (always OK)
+          if (m.meta?.summary) {
+            const p = document.createElement('div');
+            // Removed bold styling as requested
+            // p.style.fontWeight = 'bold'; 
+            p.textContent = m.meta.summary;
+            d.appendChild(p);
+          }
+
+          // 2️⃣ GRAPH MODE → image (do NOT stop here)
+          if (m.meta?.image) {
+            const img = document.createElement('img');
+            img.src = 'data:image/png;base64,' + m.meta.image;
+            img.style.maxWidth = '100%';
+            img.style.marginTop = '8px';
+            img.style.borderRadius = '8px';
+            d.appendChild(img);
+          }
+
+          // 3️⃣ SQL (show only when NOT graph-only)
+          if (m.meta?.generated_sql && !m.meta?.image) {
+            const pre = document.createElement('pre');
+            pre.className = 'sql';
+            pre.textContent = m.meta.generated_sql;
+            d.appendChild(pre);
+          }
+
+          // 4️⃣ TABLE (graph OR table mode)
+          if (m.meta?.include_table && m.meta?.columns && m.meta?.result) {
+            const table = document.createElement('table');
+
+            // Header
+            const thead = document.createElement('thead');
+            const trh = document.createElement('tr');
+            m.meta.columns.forEach(col => {
+              const th = document.createElement('th');
+              th.textContent = col;
+              trh.appendChild(th);
+            });
+            thead.appendChild(trh);
+            table.appendChild(thead);
+
+            // Body
+            const tbody = document.createElement('tbody');
+            m.meta.result.forEach(row => {
+              const tr = document.createElement('tr');
+              row.forEach(cell => {
+                const td = document.createElement('td');
+                td.textContent = cell;
+                tr.appendChild(td);
+              });
+              tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            table.style.marginTop = '10px';
+            d.appendChild(table);
+          }
+        }
+        chatEl.appendChild(d);
+      }
+
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+
+
+    sendBtn.onclick = async () => {
+      const question = qEl.value.trim();
+      if (!question) return;
+
+      history.push({ role: 'user', text: question });
+      renderChat();
+      sendBtn.disabled = true;
+
+      const res = await fetch('/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + localStorage.getItem('access_token')
+        },
+        body: JSON.stringify({
+          question,
+          llm_mode: document.getElementById("llmMode").value
+        })
+      });
+
+      console.log("Sending request to /chat");
+      const data = await res.json();
+
+      document.getElementById("activeModel").textContent =
+        "LLM used: " + document.getElementById("llmMode").value;
+
+      history.push({ role: 'assistant', meta: data });
+      renderChat();
+
+
+      qEl.value = '';
+      sendBtn.disabled = false;
+    };
+
+    // --- VOICE INPUT ---
+    const micBtn = document.getElementById('micBtn');
+    let mediaRecorder;
+    let audioChunks = [];
+
+    micBtn.onclick = async () => {
+      if (!mediaRecorder || mediaRecorder.state === "inactive") {
+        // Start Recording
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' }); // Use webm/wav
+
+          audioChunks = [];
+          mediaRecorder.ondataavailable = event => {
+            audioChunks.push(event.data);
+          };
+
+          mediaRecorder.onstop = async () => {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            await sendAudio(audioBlob);
+            stream.getTracks().forEach(track => track.stop()); // Stop mic
+          };
+
+          mediaRecorder.start();
+          micBtn.textContent = "🛑";
+          micBtn.style.background = "#ef4444";
+        } catch (err) {
+          console.error("Mic access denied:", err);
+          alert("Microphone access denied or not supported.");
+        }
+      } else {
+        // Stop Recording
+        mediaRecorder.stop();
+        micBtn.textContent = "🎤";
+        micBtn.style.background = "#10b981";
+      }
+    };
+
+    async function sendAudio(blob) {
+      // Convert WebM to WAV (PCM 16kHz) effectively required for Vosk if using raw.
+      // However, vosk-api python can handle some containers if ffmpeg is present OR 
+      // we assume the user sends WAV. 
+      // Since browser MediaRecorder usually gives WebM/Ogg, and Vosk strictly likes WAV/PCM,
+      // we strictly need to ensure backend can handle it OR we convert here.
+      // To keep it simple: We'll send the blob. Backend needs to be robust. 
+      // IF backend fails, we might need a client-side library like wav-encoder or similar.
+
+      // Simplest approach: Send Webm, backend handles conversion? 
+      // Vosk `KaldiRecognizer` expects raw bytes or a wave object. 
+      // Let's rely on `vosk` accepting WAV. 
+
+      // NOTE: Generating valid WAV in pure JS without libs is complex.
+      // Let's assume for this step we send the blob and update backend to convert if needed.
+      // BUT, since we have no converter on backend (pydub requires ffmpeg), 
+      // we will add a simple WAV conversion in JS if this fails in verification.
+
+      // Implementing a minimal WAV encoder inline for 16kHz Mono to be safe for Vosk.
+
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      const arrayBuffer = await blob.arrayBuffer();
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+      const wavBlob = bufferToWav(audioBuffer);
+
+      const formData = new FormData();
+      formData.append("file", wavBlob, "voice_input.wav");
+
+      micBtn.disabled = true;
+      try {
+        const res = await fetch("/transcribe", {
+          method: "POST",
+          body: formData
+        });
+        const data = await res.json();
+        if (data.text) {
+          qEl.value = data.text;
+        } else if (data.error) {
+          console.error("Transcribe error:", data.error);
+        }
+      } catch (e) {
+        console.error("Transcribe request failed:", e);
+      }
+      micBtn.disabled = false;
+    }
+
+    // Minimal WAV export for 16kHz Mono
+    function bufferToWav(abuffer) {
+      const numOfChan = 1;
+      const length = abuffer.length * numOfChan * 2 + 44;
+      const buffer = new ArrayBuffer(length);
+      const view = new DataView(buffer);
+      const channels = [];
+      let i;
+      let sample;
+      let offset = 0;
+      let pos = 0;
+
+      // write WAVE header
+      setUint32(0x46464952); // "RIFF"
+      setUint32(length - 8); // file length - 8
+      setUint32(0x45564157); // "WAVE"
+
+      setUint32(0x20746d66); // "fmt " chunk
+      setUint32(16); // length = 16
+      setUint16(1); // PCM (uncompressed)
+      setUint16(numOfChan);
+      setUint32(abuffer.sampleRate);
+      setUint32(abuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
+      setUint16(numOfChan * 2); // block-align
+      setUint16(16); // 16-bit (hardcoded in this loop)
+
+      setUint32(0x61746164); // "data" - chunk
+      setUint32(length - pos - 4); // chunk length
+
+      // write interleaved data
+      for (i = 0; i < abuffer.numberOfChannels; i++)
+        channels.push(abuffer.getChannelData(i));
+
+      while (pos < abuffer.length) {
+        for (i = 0; i < numOfChan; i++) { // interleave channels
+          sample = Math.max(-1, Math.min(1, channels[i][pos])); // clamp
+          sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0; // scale to 16-bit signed int
+          view.setInt16(44 + offset, sample, true); // write 16-bit sample
+          offset += 2;
+        }
+        pos++;
+      }
+
+      return new Blob([buffer], { type: "audio/wav" });
+
+      function setUint16(data) {
+        view.setUint16(pos, data, true);
+        pos += 2;
+      }
+      function setUint32(data) {
+        view.setUint32(pos, data, true);
+        pos += 4;
+      }
+    }
+
+    clearBtn.onclick = () => {
+      history.length = 0;
+      renderChat();
+    };
+  </script>
+
+  <script>
+    document.getElementById('logoutBtn').onclick = () => {
+      localStorage.removeItem('access_token');
+      window.location.href = '/login';
+    };
+  </script>
+</body>
+
+</html>
