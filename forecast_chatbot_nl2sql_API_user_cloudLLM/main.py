@@ -45,6 +45,49 @@ def startup():
     init_db()
 
 
+# ... imports ...
+from fastapi import FastAPI, Request, Depends, Form, UploadFile, File
+import vosk
+import json
+import wave
+
+# Initialize Vosk Model
+MODEL_PATH = "models/vosk-model-small-en-us-0.15"
+if not os.path.exists(MODEL_PATH):
+    print(f"WARNING: Vosk model not found at {MODEL_PATH}")
+    vosk_model = None
+else:
+    vosk.SetLogLevel(-1)
+    vosk_model = vosk.Model(MODEL_PATH)
+
+@app.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    if not vosk_model:
+        return JSONResponse(status_code=500, content={"error": "Vosk model not loaded"})
+    
+    try:
+        audio_data = await file.read()
+        rec = vosk.KaldiRecognizer(vosk_model, 16000)
+        
+        # Determine if we need to process as stream or whole block
+        # For simplicity, assuming the frontend sends a WAV with correct header/format (16kHz mono)
+        # However, WebAudio API usually creates headers. 
+        # Vosk expects raw PCM or WAV.
+        
+        if rec.AcceptWaveform(audio_data):
+            res = json.loads(rec.Result())
+            text = res.get("text", "")
+        else:
+            res = json.loads(rec.PartialResult()) # Sometimes needed if audio is short
+            # But normally we want FinalResult
+            res = json.loads(rec.FinalResult())
+            text = res.get("text", "")
+            
+        return {"text": text}
+    except Exception as e:
+        logger.error(f"Transcribe error: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 @app.get("/")
 def root():
     return RedirectResponse("/login")
@@ -72,8 +115,12 @@ def chat_ui():
     return FileResponse("index.html")
 
 
+# ... imports ...
+import time 
+
 @app.post("/chat")
 def chat_endpoint(body: dict, token_payload=Depends(JWTBearer())):
+    start_time = time.time()
     llm_mode = body.get("llm_mode", "ollama")
     question = body.get("question")
     role = token_payload.get("role")
@@ -90,7 +137,12 @@ def chat_endpoint(body: dict, token_payload=Depends(JWTBearer())):
         return {
             "question": question,
             "output_type": "nl",
-            "summary": greeting_response()
+            "summary": greeting_response(),
+            "debug_info": {
+                "llm_mode": llm_mode,
+                "intent": "greeting",
+                "time_taken": f"{time.time() - start_time:.2f}s"
+            }
         }
 
     # 2️⃣ INTENT
@@ -100,16 +152,22 @@ def chat_endpoint(body: dict, token_payload=Depends(JWTBearer())):
     # 3️⃣ FORECAST
     if intent == "python_model":
         logger.info("Route → FORECAST PIPELINE")
-        return forecast_revenue(question, role, llm_mode=llm_mode)
+        response = forecast_revenue(question, role, llm_mode=llm_mode)
+        response["debug_info"] = {
+            "llm_mode": llm_mode,
+            "intent": intent,
+            "time_taken": f"{time.time() - start_time:.2f}s"
+        }
+        return response
 
     # 4️⃣ NL2SQL
     logger.info("Route → NL2SQL PIPELINE")
 
     result = handle_nl2sql(
-    question=question,
-    role=role,
-    schema=SCHEMA,
-    llm_mode=llm_mode
+        question=question,
+        role=role,
+        schema=SCHEMA,
+        llm_mode=llm_mode
     )
 
     if "generated_sql" in result:
@@ -117,5 +175,11 @@ def chat_endpoint(body: dict, token_payload=Depends(JWTBearer())):
 
     if isinstance(result.get("result"), list):
         logger.info(f"Rows returned: {len(result['result'])}")
+    
+    result["debug_info"] = {
+        "llm_mode": llm_mode,
+        "intent": intent,
+        "time_taken": f"{time.time() - start_time:.2f}s"
+    }
 
     return result

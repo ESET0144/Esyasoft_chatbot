@@ -24,19 +24,45 @@ def parse_reference_date(prompt: str):
     Returns datetime or None.
     """
     patterns = [
-        r'(\d{2}-\d{2}-\d{4})',
-        r'(\d{4}-\d{2}-\d{2})',
-        r'(\d{2}\s+[A-Za-z]{3,9}\s+\d{4})'
+        # Match dd-mm-yyyy or dd/mm/yyyy or d-m-yyyy etc.
+        # We allow 1 or 2 digits for day/month, and 4 digits for year.
+        # Separators can be -, /, ., or space
+        r'(\d{1,2}[-/. ]\d{1,2}[-/. ]\d{4})',
+        
+        # Match yyyy-mm-dd (ISOish)
+        r'(\d{4}[-/. ]\d{1,2}[-/. ]\d{1,2})',
+        
+        # Match dd Mon yyyy (e.g. 01 Jan 2020)
+        r'(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})'
     ]
 
     for p in patterns:
         m = re.search(p, prompt)
         if m:
-            s = m.group(1)
-            for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d %b %Y", "%d %B %Y"):
+            s_raw = m.group(1)
+            # Normalize separators to dashes for easier parsing
+            s = re.sub(r'[-/. ]', '-', s_raw)
+            
+            for fmt in (
+                "%d-%m-%Y", 
+                "%Y-%m-%d", 
+                "%d-%b-%Y", # handled by normalization if spaces became dashes? 
+                            # Wait, "01 Jan 2020" -> "01-Jan-2020"
+                "%d-%B-%Y"
+            ):
                 try:
+                     # Special case for alphabetic months which might not have dash in original string if we just replaced separators
+                     # But our regex allows spaces. Only the numbered ones are critical.
+                     # Let's rely on standard formats.
+                     
                     return datetime.strptime(s, fmt)
                 except:
+                    # Retry with raw string for "01 Jan 2020" formats just in case normalization broke it
+                    try:
+                        if " " in s_raw:
+                             return datetime.strptime(s_raw, fmt.replace("-", " "))
+                    except:
+                        pass
                     continue
 
     # fallback: pandas (handles many edge cases)
